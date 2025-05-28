@@ -1,0 +1,74 @@
+site_name: NZB-Load
+site_description: Modernes UserScript für nahtloses Herunterladen von NZB-Dateien direkt über nzblnk
+site_url: https://lordbex.github.io/nzb-load/
+repo_url: https://github.com/LordBex/nzb-load
+repo_name: LordBex/nzb-load
+
+theme:
+  name: material
+  language: de
+  logo: icon/nzb-load.svg
+  favicon: icon/icon.svg
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - tables
+  - attr_list
+  - md_in_html
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+nav:
+  - Home: index.md
+  - Installation: install.md
+  - Einstellungen: options.md
+  - Verwendung: usage.md
+  - Fehlerbehebung: troubleshooting.md
+  - UserScript-Manager: userscripts-manager.md
+
+extra_css:
+    - css/style.css
+
+extra_javascript:
+    - js/script.js
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/LordBex/nzb-load
+      name: GitHub Repository
+  generator: false
