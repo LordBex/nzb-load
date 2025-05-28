@@ -1,18 +1,12 @@
-![](icon/nzb-load.svg)
+![](docs/icon/nzb-load.svg)
 
 Modernes UserScript für das nahtlose Herunterladen von NZB-Dateien direkt über [nzblnk](https://nzblnk.info/). Links.
 Es ist vollständig kompatibel mit SABnzbd und allen gängigen UserScript-Managern.
 
-<div class="is-not-installed admonition tip"> 
-    <p class="admonition-title">Nzb-Load <span class="nzb-load-version"></span> ist installiert</p> 
-    <p>
-         <a href="#" class="open-nzbload-settings">Einstellungen öffnen</a> 
-    </p> 
-</div>
 
 ## ✨ Funktionen
 
-- **🔗 Automatische Erkennung**: Erkennt automatisch Links mit dem Schema "nzblnk:" und aktiviert sich nahtlos im
+- **🔗 Automatische Erkennung**: Erkennt automatisch Links mit dem Schema [nzblnk](https://nzblnk.info/) und aktiviert sich nahtlos im
   Hintergrund.
 - **⬇️ Intelligenter Download**: Wandelt nzblnk: Links um und ermöglicht direkten Download von nzbindex.com und anderen
   Quellen.
