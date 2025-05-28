@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>NZB Tamper - Settings</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="icon/icon.svg" type="image/png">
+    <style>
+        :root {
+            --dark-bg: #212529;
+        }
+
+        body {
+            color: var(--text-color);
+            background-color: var(--dark-bg);
+        }
+    </style>
+</head>
+<body>
+
+
+<script>
+    timeoutEvent = setTimeout(() => {
+        alert('Du muss das NZB Tamper UserScript installiert haben, um diese Seite zu nutzen.');
+    }, 3000);
+
+    document.addEventListener('init-nzb-load', (event) => {
+        // Open the NZB Tamper settings page
+        document.dispatchEvent(new CustomEvent('open-nzbload-settings', {}));
+        clearTimeout(timeoutEvent);
+    })
+</script>
+
+</body>
+</html>
