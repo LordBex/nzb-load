@@ -4,6 +4,9 @@ site_url: https://lordbex.github.io/nzb-load/
 repo_url: https://github.com/LordBex/nzb-load
 repo_name: LordBex/nzb-load
 
+edit_uri: 'blob/main/docs/'
+edit_uri_template: 'blob/main/docs/{path}'
+
 theme:
   name: material
   language: de
