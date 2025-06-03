@@ -26,16 +26,31 @@ console.log("nzb-load loaded")
 const DEFAULT_SETTINGS = {
     ausgabe: 'download',
     disable_success_alert: false,
+
     sab_api_key: '',
     sab_url: 'http://localhost:8080/api',
     sab_categories: [],
     sab_default_category: '*',
-    sab_sub_menu: true
+    sab_sub_menu: true,
+
+    getnzb_url: 'http://localhost:6789',
+    getnzb_username: '',
+    getnzb_password: '',
 };
 
 // Initialisierung der Einstellungen
 const SETTINGS = DEFAULT_SETTINGS;
 const SETTINGS_KEY = 'nzb-load-settings';
+
+const SAB_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json"
+}
+
+const NZBGET_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept": "application/json"
+}
 
 // Load settings from GM storage or use defaults
 function loadSettings() {
@@ -47,6 +62,14 @@ function loadSettings() {
                 console.log("Default settings saved.");
             });
         }
+
+        document.dispatchEvent(new CustomEvent('init-nzb-load', {
+            detail: {
+                version: GM.info.script.version,
+                name: GM.info.script.name,
+            }
+        }));
+
     })
 }
 
@@ -61,41 +84,18 @@ loadSettings();
 // ------------------------------------------------------------
 // menu buttons
 
-async function openMenu(parameters) {
-    const sabButtons = await getCategoriesButtons(parameters)
-
-    const buttons = [
-        {
-            name: 'Download',
-            f: () => {
-                downloadAndSave(parameters)
-            },
-            bgColor: '#0D4715',
-            icon: 'https://raw.githubusercontent.com/sabnzbd/sabnzbd/refs/heads/develop/icons/nzb.ico'
-        }
-    ]
-
-    if (SETTINGS.sab_sub_menu) {
-        buttons.push({
-            name: 'Zu Sabnzbd',
-            f: () => {
-                modal.showModal([
-                    {
-                        name: 'Zurück',
-                        bgColor: '#4F959D',
-                        f: () => {
-                            modal.showModal(buttons)
-                        }
-                    },
-                    ...sabButtons
-                ])
-            },
-            icon: 'https://raw.githubusercontent.com/sabnzbd/sabnzbd/refs/heads/develop/icons/sabnzbd.ico'
-        })
-    } else {
-        buttons.push(...sabButtons)
+function getDownloadButton(parameters) {
+    return {
+        name: 'Download',
+        f: () => {
+            downloadAndSave(parameters)
+        },
+        bgColor: '#0D4715',
+        icon: 'https://raw.githubusercontent.com/sabnzbd/sabnzbd/refs/heads/develop/icons/nzb.ico'
     }
+}
 
+async function openMenu(buttons) {
     infoModal.closeModal()
     modal.showModal(buttons)
 }
@@ -108,155 +108,258 @@ function customHandler({downloadLink, fileName, password}) {
 // ------------------------------------------------------------
 // sab-code
 
+const SABNZBD = {
+    addUrl: function ({downloadLink, fileName, password, category = '*'}) {
+        const formData = new FormData();
+        formData.append('name', downloadLink);
+        formData.append('mode', 'addurl');
+        formData.append('output', 'json');
+        formData.append('apikey', SETTINGS.sab_api_key);
+        formData.append('cat', category);
+        if (fileName) {
+            formData.append('nzbname', fileName);
+        }
+        if (password) {
+            formData.append('password', password);
+        }
+
+        infoModal.print("Sende Link zu Sab ...")
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: SETTINGS.sab_url,
+            data: formData,
+            headers: SAB_HEADERS,
+            onload: function (response) {
+                console.log(response.responseText);
+                let result = JSON.parse(response.responseText);
+
+                if (result.status === true) {
+                    infoModal.print("Erfolg! NZB hinzugefügt. ID: " + result.nzo_ids.join(', '))
+                    infoModal.closeIn(3000)
+                } else {
+                    infoModal.showModal()
+                    infoModal.error('Fehler beim Hinzufügen der NZB-Datei zu SABnzbd.\n' + result.error);
+                }
+            },
+            onerror: function (response) {
+                console.error('Anfrage fehlgeschlagen', response);
+                alert("Anfrage an SABnzb schlug fail ! (mehr im Log)")
+            }
+        });
+    },
+
+    uploadNzb: function ({responseText, fileName, password, category = SETTINGS.sab_default_category}) {
+        let formData = new FormData();
+        let blob = new Blob([responseText], {type: "text/xml"});
+        formData.append('name', blob, fileName);
+        formData.append('mode', 'addfile');
+        if (fileName) {
+            formData.append('nzbname', fileName);
+        }
+        if (password) {
+            formData.append('password', password);
+        }
+        formData.append('output', 'json');
+        formData.append('cat', category);
+        formData.append('apikey', SETTINGS.sab_api_key);
+        console.log('Upload Nzb to Sab:', formData);
+        infoModal.print("Lade Nzb zu SABnzbd hoch ...")
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: SETTINGS.sab_url,
+            data: formData,
+            headers: SAB_HEADERS,
+            onload: function (response) {
+                console.log('Upload response', response.status, response.statusText);
+                console.log('Response body', response.responseText);
+                let result = JSON.parse(response.responseText);
+                if (result.status === true) {
+                    successAlert('Success! NZB added. ID: ' + result.nzo_ids.join(', '));
+                } else {
+                    alert('Error adding NZB file to SABnzbd.\n' + (result.error || 'Unknown error'));
+                }
+            },
+            onerror: function (response) {
+                console.error('Error during file upload', response.status, response.statusText);
+                alert("Could not upload NZB! (more in log)");
+            }
+        });
+    },
+
+    getCategories: function ({callback, failed_callback, url, key}) {
+        url = url || SETTINGS.sab_url;
+        key = key || SETTINGS.sab_api_key;
+
+        if (!url || !key) {
+            alert('Bitte gib zuerst die SABnzbd URL und den API-Key ein.');
+            return;
+        }
+
+        const requestURL = new URL(url);
+        requestURL.searchParams.append('output', 'json');
+        requestURL.searchParams.append('mode', 'get_cats');
+        requestURL.searchParams.append('apikey', key);
+
+        GM_xmlhttpRequest({
+            method: "GET",
+            url: requestURL.toString(),
+            headers: {
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json"
+            },
+            onload: (response) => {
+                try {
+                    const data = JSON.parse(response.responseText);
+                    if (data.categories && data.categories.length > 0) {
+                        if (callback) {
+                            callback(data.categories);
+                        } else { // debug message
+                            alert('Kategorien in SABnzbd: ' + data.categories.join(', '));
+                        }
+                    } else {
+                        alert('Keine Kategorien in SABnzbd gefunden.');
+                    }
+                } catch (e) {
+                    console.error('Error parsing SABnzbd response:', e);
+                    alert('Fehler beim Laden der Kategorien: ' + e.message);
+                }
+            },
+            onerror: (error) => {
+                console.error('Error loading categories from SABnzbd:', error);
+                alert('Fehler beim Laden der Kategorien von SABnzbd.');
+                if (failed_callback) {
+                    failed_callback(error);
+                }
+            }
+        });
+
+    },
+
+    makeButton: function (parameters, category) {
+        return {
+            name: category.charAt(0).toUpperCase() + category.slice(1),
+            value: category.toLowerCase(),
+            f: () => {
+                parameters.category = category;
+                SABNZBD.addUrl(parameters);
+            }
+        };
+    }
+}
+
+const NZBGET = {
+    _getUrl: function (username, password) {
+        if (!SETTINGS.getnzb_url) {
+            alert('Bitte gib zuerst die GetNZB URL ein.');
+            return null;
+        }
+        // add http-auth data
+        const url = new URL(SETTINGS.getnzb_url);
+        url.username = username || SETTINGS.getnzb_username || '';
+        url.password = password || SETTINGS.getnzb_password || '';
+
+        // add a path if not already present 'jsonrpc'
+        if (!url.pathname.includes('jsonrpc')) {
+            url.pathname = url.pathname.replace(/\/$/, '') + '/jsonrpc';
+        }
+
+        return url.toString();
+    },
+
+    _request: function ({method, params = {}, callback, error}) {
+        const data = {
+            jsonrpc: "2.0",
+            method: method,
+            params: params,
+            id: Math.floor(Math.random() * 1000000)
+        };
+
+        const url = this._getUrl(SETTINGS.getnzb_username, SETTINGS.getnzb_password);
+
+        if (!url) {
+            return null; // URL is not valid
+        }
+
+        GM_xmlhttpRequest({
+            method: "POST",
+            url: url,
+            data: JSON.stringify(data),
+            headers: NZBGET_HEADERS,
+            onload: function (response) {
+                callback(response);
+            },
+            onerror: function (response) {
+                error(response);
+            }
+        })
+    },
+
+    addUrl: function ({downloadLink, fileName, password}) {
+        // remove non Asci
+        fileName = fileName.replace(/[^\x20-\x7E]/g, '').trim();
+        // docs: https://nzbget.com/documentation/api/append/
+        this._request({
+            method: "append",
+            params: [
+                fileName + ".nzb",
+                downloadLink,
+                "",
+                0,
+                false,
+                false,
+                "",
+                0,
+                "FORCE",
+                [
+                    {"*unpack": "yes"},
+                    {'*unpack:password': password || ''},
+                ],
+            ],
+
+            callback: function (response) {
+                console.log(response.responseText);
+                try {
+                    let result = JSON.parse(response.responseText);
+
+                    if (result.error) {
+                        infoModal.showModal()
+                        infoModal.error('Fehler beim Hinzufügen der NZB-Datei zu GetNZB.\n' + result.error.message);
+                    } else if (result.result) {
+                        infoModal.print("Erfolg! NZB hinzugefügt. ID: " + (result.result || 'Unknown'))
+                        infoModal.closeIn(3000)
+                    } else {
+                        infoModal.showModal()
+                        infoModal.error('Unbekannter Fehler beim Hinzufügen der NZB-Datei zu GetNZB.');
+                    }
+                } catch (e) {
+                    console.error('Error parsing response:', e);
+                    infoModal.showModal()
+                    infoModal.error('Fehler beim Verarbeiten der Antwort von GetNZB.');
+                }
+            },
+            error: function (response) {
+                console.error('Anfrage fehlgeschlagen', response);
+                alert("Anfrage an GetNZB schlug fehl! (mehr im Log)")
+            }
+        });
+
+        infoModal.print("Sende Link zu GetNZB ...")
+    },
+}
+
+
 function successAlert(message) {
     if (!SETTINGS.disable_success_alert) {
         alert(message)
     }
 }
 
-function addNZBtoSABnzbd({downloadLink, fileName, password, category = SETTINGS.sab_default_category}) {
-    const formData = new FormData();
-    formData.append('name', downloadLink);
-    formData.append('mode', 'addurl');
-    formData.append('output', 'json');
-    formData.append('apikey', SETTINGS.sab_api_key);
-    formData.append('cat', category);
-    if (fileName) {
-        formData.append('nzbname', fileName);
-    }
-    if (password) {
-        formData.append('password', password);
-    }
-
-    infoModal.print("Sende Link zu Sab ...")
-
-    GM_xmlhttpRequest({
-        method: "POST",
-        url: SETTINGS.sab_url,
-        data: formData,
-        headers: {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json"
-        },
-        onload: function (response) {
-            console.log(response.responseText);
-            let result = JSON.parse(response.responseText);
-
-            if (result.status === true) {
-                infoModal.print("Erfolg! NZB hinzugefügt. ID: " + result.nzo_ids.join(', '))
-                infoModal.closeIn(3000)
-            } else {
-                infoModal.showModal()
-                infoModal.error('Fehler beim Hinzufügen der NZB-Datei zu SABnzbd.\n' + result.error);
-            }
-        },
-        onerror: function (response) {
-            console.error('Anfrage fehlgeschlagen', response);
-            alert("Anfrage an SABnzb schlug fail ! (mehr im Log)")
-        }
-    });
-}
-
-function uploadNZBtoSABnzbd({responseText, fileName, password, category = SETTINGS.sab_default_category}) {
-
-    let formData = new FormData();
-    let blob = new Blob([responseText], {type: "text/xml"});
-    formData.append('name', blob, fileName);
-    formData.append('mode', 'addfile');
-    if (fileName) {
-        formData.append('nzbname', fileName);
-    }
-    if (password) {
-        formData.append('password', password);
-    }
-    formData.append('output', 'json');
-    formData.append('cat', category);
-    formData.append('apikey', SETTINGS.sab_api_key);
-    console.log('Upload Nzb to Sab:', formData);
-    infoModal.print("Lade Nzb zu SABnzbd hoch ...")
-
-    GM_xmlhttpRequest({
-        method: "POST",
-        url: SETTINGS.sab_url,
-        data: formData,
-        onload: function (response) {
-            console.log('Upload response', response.status, response.statusText);
-            console.log('Response body', response.responseText);
-            let result = JSON.parse(response.responseText);
-            if (result.status === true) {
-                successAlert('Success! NZB added. ID: ' + result.nzo_ids.join(', '));
-            } else {
-                alert('Error adding NZB file to SABnzbd.\n' + (result.error || 'Unknown error'));
-            }
-        },
-        onerror: function (response) {
-            console.error('Error during file upload', response.status, response.statusText);
-            alert("Could not upload NZB! (more in log)");
-        }
-    });
-}
-
-function getSabCategorie(callback, failed_callback) {
-    if (!SETTINGS.sab_url || !SETTINGS.sab_api_key) {
-        alert('Bitte gib zuerst die SABnzbd URL und den API-Key ein.');
-        return;
-    }
-
-    const requestURL = new URL(SETTINGS.sab_url);
-    requestURL.searchParams.append('output', 'json');
-    requestURL.searchParams.append('mode', 'get_cats');
-    requestURL.searchParams.append('apikey', SETTINGS.sab_api_key);
-
-    GM_xmlhttpRequest({
-        method: "GET",
-        url: requestURL.toString(),
-        headers: {
-            "User-Agent": "Mozilla/5.0",
-            "Accept": "application/json"
-        },
-        onload: (response) => {
-            try {
-                const data = JSON.parse(response.responseText);
-                if (data.categories && data.categories.length > 0) {
-                    if (callback) {
-                        callback(data.categories);
-                    } else { // debug message
-                        alert('Kategorien in SABnzbd: ' + data.categories.join(', '));
-                    }
-                } else {
-                    alert('Keine Kategorien in SABnzbd gefunden.');
-                }
-            } catch (e) {
-                console.error('Error parsing SABnzbd response:', e);
-                alert('Fehler beim Laden der Kategorien: ' + e.message);
-            }
-        },
-        onerror: (error) => {
-            console.error('Error loading categories from SABnzbd:', error);
-            alert('Fehler beim Laden der Kategorien von SABnzbd.');
-            if (failed_callback) {
-                failed_callback(error);
-            }
-        }
-    });
-
-}
-
-function makeSabButton(parameters, category) {
-    return {
-        name: category.charAt(0).toUpperCase() + category.slice(1),
-        value: category.toLowerCase(),
-        f: () => {
-            parameters.category = category
-            addNZBtoSABnzbd(parameters)
-        }
-    }
-}
-
 function getCategoriesButtons(parameters) {
     if (SETTINGS.sab_categories.length > 0) {
         return SETTINGS.sab_categories.map(item => {
-            return makeSabButton(parameters, item);
+            return SABNZBD.makeButton(parameters, item);
         })
     } else {
         alert("Keine Kategorien in den Einstellungen gefunden. Bitte zuerst Kategorien hinzufügen.")
@@ -342,18 +445,6 @@ function downloadAndSave({downloadLink, fileName, password}) {
             setTimeout(() => {
                 infoModal.closeModal()
             }, 3000)
-        }
-    })
-}
-
-function downloadAndSab({downloadLink, fileName, password, category = SETTINGS.sab_default_category}) {
-    downloadFile({
-        downloadLink,
-        fileName,
-        password,
-        callback: (parameter) => {
-            parameter.category = category
-            uploadNZBtoSABnzbd(parameter)
         }
     })
 }
@@ -1183,7 +1274,6 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
 
                     button {
                         padding: 14px 20px;
-                        width: 100%;
                         margin-right: 0;
                     }
 
@@ -1230,6 +1320,7 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                             <div class="tab-navigation">
                                 <button type="button" class="tab-button active" data-tab="general">Allgemein</button>
                                 <button type="button" class="tab-button" data-tab="sab">SABnzbd</button>
+                                <button type="button" class="tab-button" data-tab="nzbget">NzbGet</button>
                                 <button type="button" class="tab-button" data-tab="importexport" title="Import/Export">
                                     Import/Export
                                 </button>
@@ -1243,11 +1334,11 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                                             <label>
                                                 Ausgabe:
                                                 <select id="ausgabe">
-                                                    <option value="menu">Menü</option>
                                                     <option value="download">Download</option>
-                                                    <option value="URLtoSABnzb">URL zu SABnzbd</option>
-                                                    <option value="NZBtoSABnzb">NZB zu SABnzbd</option>
-                                                    <option value="custom">Custom Handler</option>
+                                                    <option value="sabnzbd">Sabnzbd</option>
+                                                    <option value="sab_menu">Sabnzbd Menü</option>
+                                                    <option value="nzbget">NzbGet</option>
+                                                    <option value="nzbget_menu">NzbGet Menü</option>
                                                 </select>
                                             </label>
                                             <label class="checkbox-label">
@@ -1268,6 +1359,9 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                                                 SABnzbd API Key:
                                                 <input type="password" id="sab_api_key">
                                             </label>
+                                        </div>
+
+                                        <div class="settings-section" id="sab_default_category-section">
                                             <label id="sab_default_category-label">
                                                 Standard Kategorie:
                                                 <input type="text" id="sab_default_category" placeholder="*">
@@ -1292,6 +1386,25 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                                             </div>
                                             <button type="button" class="load-categories">Kategorien von SABnzbd laden
                                             </button>
+                                        </div>
+                                    </div>
+
+                                    <div id="nzbget-tab" class="tab-content">
+                                        <div class="settings-section">
+                                            <h3>NzbGet Verbindung</h3>
+                                            <label>
+                                                URL:
+                                                <input type="text" id="nzbget_url" name="nzbget_url"
+                                                       placeholder="http://localhost:8080/api">
+                                            </label>
+                                            <label>
+                                                Nutzername:
+                                                <input type="text" id="nzbget_username">
+                                            </label>
+                                            <label>
+                                                Passwort:
+                                                <input type="password" id="nzbget_password">
+                                            </label>
                                         </div>
                                     </div>
 
@@ -1391,6 +1504,36 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
         }
     }
 
+    stopPropagation(e) {
+        e.stopPropagation();
+    }
+
+    showToast(message, isError = false) {
+        // Alte Toast-Nachricht entfernen, falls vorhanden
+        const oldToast = this.shadowRoot.querySelector('.toast');
+        if (oldToast) {
+            oldToast.remove();
+        }
+
+        // Neue Toast-Nachricht erstellen
+        const toast = document.createElement('div');
+        toast.className = `toast ${isError ? 'error' : ''}`;
+        toast.textContent = message;
+
+        this.dialog.appendChild(toast);
+
+        // Toast nach 3 Sekunden automatisch ausblenden
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(20px)';
+            toast.style.transition = 'opacity 0.3s, transform 0.3s';
+
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // Import / Export Settings
+
     handleExportSettings() {
         const settings = {
             ausgabe: this.shadowRoot.querySelector('#ausgabe').value,
@@ -1432,48 +1575,40 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
         reader.readAsText(file);
     }
 
-    // Verhindern der Event-Propagation
-    stopPropagation(e) {
-        e.stopPropagation();
-    }
-
-    // Toast-Benachrichtigungen statt alerts
-    showToast(message, isError = false) {
-        // Alte Toast-Nachricht entfernen, falls vorhanden
-        const oldToast = this.shadowRoot.querySelector('.toast');
-        if (oldToast) {
-            oldToast.remove();
-        }
-
-        // Neue Toast-Nachricht erstellen
-        const toast = document.createElement('div');
-        toast.className = `toast ${isError ? 'error' : ''}`;
-        toast.textContent = message;
-
-        this.dialog.appendChild(toast);
-
-        // Toast nach 3 Sekunden automatisch ausblenden
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(20px)';
-            toast.style.transition = 'opacity 0.3s, transform 0.3s';
-
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
-    }
+    // Modal Things
 
     updateShowAndHidden() {
         const ausgabeValue = this.shadowRoot.querySelector('#ausgabe').value;
-        const defaultCategoryLabel = this.shadowRoot.querySelector('#sab_default_category-label');
-        const categoryListSection = this.shadowRoot.querySelector('#sab-cat-list');
 
-        if (ausgabeValue === 'menu') {
-            defaultCategoryLabel.style.display = 'none';
-            categoryListSection.style.display = 'block';
+        // tabs
+        const sabnzbd_tab_button = this.shadowRoot.querySelector('.tab-button[data-tab="sab"]');
+        const nzbget_tab_button = this.shadowRoot.querySelector('.tab-button[data-tab="nzbget"]');
+
+        // sections
+        const sab_default_cat = this.shadowRoot.querySelector('#sab_default_category-section');
+        const sab_cat_list = this.shadowRoot.querySelector('#sab-cat-list');
+
+
+        if (ausgabeValue === 'sab_menu') {
+            sab_default_cat.style.display = 'none';
+            sab_cat_list.style.display = 'block';
         } else {
-            defaultCategoryLabel.style.display = 'block';
-            categoryListSection.style.display = 'none';
+            sab_default_cat.style.display = 'block';
+            sab_cat_list.style.display = 'none';
         }
+
+        if (ausgabeValue === 'sab_menu' || ausgabeValue === 'sabnzbd') {
+            sabnzbd_tab_button.style.display = 'block';
+        } else {
+            sabnzbd_tab_button.style.display = 'none';
+        }
+
+        if (ausgabeValue === 'nzbget' || ausgabeValue === 'nzbget_menu') {
+            nzbget_tab_button.style.display = 'block';
+        } else {
+            nzbget_tab_button.style.display = 'none';
+        }
+
     }
 
     showModal() {
@@ -1531,23 +1666,7 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
         if (this.importResult) this.importResult.textContent = '';
     }
 
-    loadCurrentSettings() {
-        // Allgemeine Einstellungen laden
-        const ausgabeSelect = this.shadowRoot.querySelector('#ausgabe');
-        const disableSuccessAlert = this.shadowRoot.querySelector('#disable_success_alert');
-
-        ausgabeSelect.value = SETTINGS.ausgabe || 'menu';
-        disableSuccessAlert.checked = SETTINGS.disable_success_alert || false;
-
-        // SABnzbd-Einstellungen laden
-        this.shadowRoot.querySelector('#sab_url').value = SETTINGS.sab_url || '';
-        this.shadowRoot.querySelector('#sab_api_key').value = SETTINGS.sab_api_key || '';
-        this.shadowRoot.querySelector('#sab_default_category').value = SETTINGS.sab_default_category || '';
-        this.shadowRoot.querySelector('#sab_sub_menu').checked = SETTINGS.sab_sub_menu || false;
-
-        // SAB-Kategorien laden
-        this.renderCategories();
-    }
+    // Categories show edit and remove
 
     renderCategories() {
         this.sabCategoriesContainer.innerHTML = '';
@@ -1625,10 +1744,10 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
     }
 
     loadCategoriesFromSAB() {
-        SETTINGS.sab_url = this.shadowRoot.querySelector('#sab_url').value || SETTINGS.sab_url || '';
-        SETTINGS.sab_api_key = this.shadowRoot.querySelector('#sab_api_key').value || SETTINGS.sab_api_key || '';
+        let sab_url = this.shadowRoot.querySelector('#sab_url').value || SETTINGS.sab_url || '';
+        let sab_api_key = this.shadowRoot.querySelector('#sab_api_key').value || SETTINGS.sab_api_key || '';
 
-        if (!SETTINGS.sab_url || !SETTINGS.sab_api_key) {
+        if (!sab_url || !sab_api_key) {
             this.showToast('Bitte gib zuerst die SABnzbd URL und den API-Key ein', true);
             return;
         }
@@ -1636,8 +1755,10 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
         this.loadCategoriesButton.textContent = 'Lade...';
         this.loadCategoriesButton.disabled = true;
 
-        getSabCategorie(
-            (categories) => {
+        SABNZBD.getCategories({
+            sab_url: sab_url,
+            sab_api_key: sab_api_key,
+            callback: (categories) => {
                 if (categories && categories.length > 0) {
                     SETTINGS.sab_categories = categories;
                     this.renderCategories();
@@ -1648,13 +1769,38 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                 this.loadCategoriesButton.textContent = 'Kategorien von SABnzbd laden';
                 this.loadCategoriesButton.disabled = false;
             },
-            (error) => {
+            failed_callback: (error) => {
                 console.error('Fehler beim Laden der Kategorien:', error);
                 this.showToast('Fehler beim Laden der Kategorien. Bitte überprüfe die SABnzbd Einstellungen.', true);
                 this.loadCategoriesButton.textContent = 'Kategorien von SABnzbd laden';
                 this.loadCategoriesButton.disabled = false;
             }
-        );
+        });
+    }
+
+    // Settings save and load
+
+    loadCurrentSettings() {
+        // Allgemeine Einstellungen laden
+        const ausgabeSelect = this.shadowRoot.querySelector('#ausgabe');
+        const disableSuccessAlert = this.shadowRoot.querySelector('#disable_success_alert');
+
+        ausgabeSelect.value = SETTINGS.ausgabe || 'menu';
+        disableSuccessAlert.checked = SETTINGS.disable_success_alert || false;
+
+        // SABnzbd-Einstellungen laden
+        this.shadowRoot.querySelector('#sab_url').value = SETTINGS.sab_url || '';
+        this.shadowRoot.querySelector('#sab_api_key').value = SETTINGS.sab_api_key || '';
+        this.shadowRoot.querySelector('#sab_default_category').value = SETTINGS.sab_default_category || '';
+        this.shadowRoot.querySelector('#sab_sub_menu').checked = SETTINGS.sab_sub_menu || false;
+
+        // NzbGet-Einstellungen laden
+        this.shadowRoot.querySelector('#nzbget_url').value = SETTINGS.nzbget_url || '';
+        this.shadowRoot.querySelector('#nzbget_username').value = SETTINGS.nzbget_username || '';
+        this.shadowRoot.querySelector('#nzbget_password').value = SETTINGS.nzbget_password || '';
+
+        // SAB-Kategorien laden
+        this.renderCategories();
     }
 
     saveSettings() {
@@ -1669,6 +1815,11 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
             sab_default_category: this.shadowRoot.querySelector('#sab_default_category').value,
             sab_sub_menu: this.shadowRoot.querySelector('#sab_sub_menu').checked,
             sab_categories: SETTINGS.sab_categories || [],
+
+            // NzbGet-Einstellungen
+            nzbget_url: this.shadowRoot.querySelector('#nzbget_url').value,
+            nzbget_username: this.shadowRoot.querySelector('#nzbget_username').value,
+            nzbget_password: this.shadowRoot.querySelector('#nzbget_password').value,
         };
 
         // Einstellungen speichern
@@ -1695,6 +1846,7 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
 
 const settingsModal = document.createElement('nzblnk-settings-modal');
 document.body.appendChild(settingsModal);
+
 // ------------------------------------------------------------
 // nzb handler
 
@@ -1707,18 +1859,79 @@ function handleNzb(downloadLink, fileName, password) {
         download: () => {
             downloadAndSave({downloadLink, fileName, password})
         },
-        menu: () => {
-            openMenu({downloadLink, fileName, password}).then(
+        sab_menu: () => {
+            const parameters = {downloadLink, fileName, password}
+
+            const buttons = [getDownloadButton(parameters)];
+
+            if (SETTINGS.sab_categories && SETTINGS.sab_categories.length > 1) {
+                const sabButtons = getCategoriesButtons(parameters);
+
+                if (SETTINGS.sab_sub_menu) {
+                    buttons.push({
+                        name: 'Zu Sabnzbd',
+                        f: () => {
+                            modal.showModal([
+                                {
+                                    name: 'Zurück',
+                                    bgColor: '#4F959D',
+                                    f: () => {
+                                        modal.showModal(buttons)
+                                    }
+                                },
+                                ...sabButtons
+                            ])
+                        },
+                        icon: 'https://raw.githubusercontent.com/sabnzbd/sabnzbd/refs/heads/develop/icons/sabnzbd.ico'
+                    })
+                } else {
+                    buttons.push(...sabButtons)
+                }
+            } else {
+                buttons.push({
+                    name: 'Sabnzbd download',
+                    f: () => {
+                        let category = '*'
+
+                        if (SETTINGS.sab_categories) {
+                            category = SETTINGS.sab_categories[0] || '*'
+                        }
+
+                        SABNZBD.addUrl({downloadLink, fileName, password, category})
+                    },
+                    icon: 'https://raw.githubusercontent.com/sabnzbd/sabnzbd/refs/heads/develop/icons/sabnzbd.ico'
+                })
+            }
+
+            openMenu(buttons).then(
                 () => {
                     console.log('menu opened')
                 }
             )
         },
-        URLtoSABnzb: () => {
-            addNZBtoSABnzbd({downloadLink, fileName, password})
+        sabnzbd: () => {
+            SABNZBD.addUrl({downloadLink, fileName, password, category: SETTINGS.sab_default_category || '*'})
         },
-        NZBtoSABnzb: () => {
-            downloadAndSab({downloadLink, fileName, password})
+        nzbget: () => {
+            NZBGET.addUrl({downloadLink, fileName, password})
+        },
+        nzbget_menu: () => {
+            const buttons = [
+                getDownloadButton({downloadLink, fileName, password}),
+                {
+                    name: 'NzbGet',
+                    f: () => {
+                        NZBGET.addUrl({downloadLink, fileName, password})
+                    },
+                    icon: 'https://avatars.githubusercontent.com/u/140404006?s=64'
+                }
+            ]
+
+            openMenu(buttons).then(
+                () => {
+                    console.log('menu opened')
+                }
+            )
         },
         custom: () => {
             customHandler({downloadLink, fileName, password})
@@ -1867,22 +2080,6 @@ function loadNzbLnk(nzblnk) {
     load()
 }
 
-
-// ------------------------------------------------------------
-// svg-icons
-
-const downloadIcon = `
-<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" style="width: 20px; height: 20px;">
-  <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
-</svg>
-`
-
-const regexIcon = `
-<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" style="width: 20px; height: 20px;">
-  <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 7.125C2.25 6.504 2.754 6 3.375 6h6c.621 0 1.125.504 1.125 1.125v3.75c0 .621-.504 1.125-1.125 1.125h-6a1.125 1.125 0 0 1-1.125-1.125v-3.75ZM14.25 8.625c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v8.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-8.25ZM3.75 16.125c0-.621.504-1.125 1.125-1.125h5.25c.621 0 1.125.504 1.125 1.125v2.25c0 .621-.504 1.125-1.125 1.125h-5.25a1.125 1.125 0 0 1-1.125-1.125v-2.25Z" />
-</svg>
-`
-
 // ------------------------------------------------------------
 // settings menu command
 
@@ -1920,13 +2117,5 @@ document.body.addEventListener('click', (event) => {
         handleLink(url);
     }
 });
-
-
-document.dispatchEvent(new CustomEvent('init-nzb-load', {
-    detail: {
-        version: GM.info.script.version,
-        name: GM.info.script.name,
-    }
-}));
 
 console.log("finished loading nzb-load script", GM.info.script.version);

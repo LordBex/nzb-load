@@ -42,9 +42,9 @@ Da die Userscripts App für Safari den Menü-Button nicht unterstützt, musst du
 
 #### Ausgabe-Optionen
 
-- **menu**: Zeigt ein Menü mit Optionen an (Download oder an SABnzbd senden)
 - **download**: Lädt die NZB-Datei direkt herunter, ohne ein Menü anzuzeigen
 - **sabnzbd**: Sendet die NZB-Datei direkt an SABnzbd, ohne ein Menü anzuzeigen
+- **sabnzbd-menu**: Zeigt ein Menü an, in dem du die gewünschte Aktion (Download oder Sab mit Kategorie) auswählen kannst
 
 ### SABnzbd-Einstellungen
 
