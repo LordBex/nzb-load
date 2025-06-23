@@ -3,7 +3,7 @@
 // @description         Automatically downloads NZB files from nzbindex.nl when links with the "nzblnk:" scheme are clicked.
 // @description:de_DE   Lädt NZB-Dateien automatisch von nzbindex.nl herunter, wenn auf Links mit dem Schema "nzblnk:" geklickt wird.
 // @author              LordBex
-// @version             v2.0.0
+// @version             v2.0.1
 // @match               *://*/*
 // @grant               GM_xmlhttpRequest
 // @grant               GM.xmlhttpRequest
@@ -33,9 +33,9 @@ const DEFAULT_SETTINGS = {
     sab_default_category: '*',
     sab_sub_menu: true,
 
-    getnzb_url: 'http://localhost:6789',
-    getnzb_username: '',
-    getnzb_password: '',
+    nzbget_url: 'http://localhost:6789',
+    nzbget_username: '',
+    nzbget_password: '',
 };
 
 // Initialisierung der Einstellungen
@@ -251,14 +251,14 @@ const SABNZBD = {
 
 const NZBGET = {
     _getUrl: function (username, password) {
-        if (!SETTINGS.getnzb_url) {
-            alert('Bitte gib zuerst die GetNZB URL ein.');
+        if (!SETTINGS.nzbget_url) {
+            alert('Bitte gib zuerst die NZBGet URL ein.');
             return null;
         }
         // add http-auth data
-        const url = new URL(SETTINGS.getnzb_url);
-        url.username = username || SETTINGS.getnzb_username || '';
-        url.password = password || SETTINGS.getnzb_password || '';
+        const url = new URL(SETTINGS.nzbget_url);
+        url.username = username || SETTINGS.nzbget_username || '';
+        url.password = password || SETTINGS.nzbget_password || '';
 
         // add a path if not already present 'jsonrpc'
         if (!url.pathname.includes('jsonrpc')) {
@@ -276,7 +276,7 @@ const NZBGET = {
             id: Math.floor(Math.random() * 1000000)
         };
 
-        const url = this._getUrl(SETTINGS.getnzb_username, SETTINGS.getnzb_password);
+        const url = this._getUrl(SETTINGS.nzbget_username, SETTINGS.nzbget_password);
 
         if (!url) {
             return null; // URL is not valid
@@ -325,27 +325,27 @@ const NZBGET = {
 
                     if (result.error) {
                         infoModal.showModal()
-                        infoModal.error('Fehler beim Hinzufügen der NZB-Datei zu GetNZB.\n' + result.error.message);
+                        infoModal.error('Fehler beim Hinzufügen der NZB-Datei zu NZBGet.\n' + result.error.message);
                     } else if (result.result) {
                         infoModal.print("Erfolg! NZB hinzugefügt. ID: " + (result.result || 'Unknown'))
                         infoModal.closeIn(3000)
                     } else {
                         infoModal.showModal()
-                        infoModal.error('Unbekannter Fehler beim Hinzufügen der NZB-Datei zu GetNZB.');
+                        infoModal.error('Unbekannter Fehler beim Hinzufügen der NZB-Datei zu NZBGet.');
                     }
                 } catch (e) {
                     console.error('Error parsing response:', e);
                     infoModal.showModal()
-                    infoModal.error('Fehler beim Verarbeiten der Antwort von GetNZB.');
+                    infoModal.error('Fehler beim Verarbeiten der Antwort von NZBGet.');
                 }
             },
             error: function (response) {
                 console.error('Anfrage fehlgeschlagen', response);
-                alert("Anfrage an GetNZB schlug fehl! (mehr im Log)")
+                alert("Anfrage an NZBGet schlug fehl! (mehr im Log)")
             }
         });
 
-        infoModal.print("Sende Link zu GetNZB ...")
+        infoModal.print("Sende Link zu NZBGet ...")
     },
 }
 
@@ -1395,7 +1395,7 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                                             <label>
                                                 URL:
                                                 <input type="text" id="nzbget_url" name="nzbget_url"
-                                                       placeholder="http://localhost:8080/api">
+                                                       placeholder="http://localhost:8080">
                                             </label>
                                             <label>
                                                 Nutzername:
@@ -1536,14 +1536,21 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
 
     handleExportSettings() {
         const settings = {
+            // Allgemeine Einstellungen
             ausgabe: this.shadowRoot.querySelector('#ausgabe').value,
             disable_success_alert: this.shadowRoot.querySelector('#disable_success_alert').checked,
+
+            // SABnzbd-Einstellungen
             sab_url: this.shadowRoot.querySelector('#sab_url').value,
             sab_api_key: this.shadowRoot.querySelector('#sab_api_key').value,
             sab_default_category: this.shadowRoot.querySelector('#sab_default_category').value,
             sab_sub_menu: this.shadowRoot.querySelector('#sab_sub_menu').checked,
             sab_categories: SETTINGS.sab_categories || [],
-            nzb_tamper_version: GM.info.script.version
+
+            // NzbGet-Einstellungen
+            nzbget_url: this.shadowRoot.querySelector('#nzbget_url').value,
+            nzbget_username: this.shadowRoot.querySelector('#nzbget_username').value,
+            nzbget_password: this.shadowRoot.querySelector('#nzbget_password').value,
         };
 
         saveFile({
