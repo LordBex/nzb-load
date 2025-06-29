@@ -1,0 +1,8 @@
+
+.is-not-installed {
+    display: none! important;
+}
+
+.md-header__topic {
+    display: none! important;
+}
