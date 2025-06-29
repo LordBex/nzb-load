@@ -3,7 +3,7 @@
 // @description         Automatically downloads NZB files from nzbindex.nl when links with the "nzblnk:" scheme are clicked.
 // @description:de_DE   Lädt NZB-Dateien automatisch von nzbindex.nl herunter, wenn auf Links mit dem Schema "nzblnk:" geklickt wird.
 // @author              LordBex
-// @version             v2.0.1
+// @version             v2.0.2
 // @match               *://*/*
 // @grant               GM_xmlhttpRequest
 // @grant               GM.xmlhttpRequest
@@ -135,15 +135,15 @@ const SABNZBD = {
                 let result = JSON.parse(response.responseText);
 
                 if (result.status === true) {
-                    infoModal.print("Erfolg! NZB hinzugefügt. ID: " + result.nzo_ids.join(', '))
+                    infoModal.print("[SAB] Erfolg! NZB hinzugefügt. ID: " + result.nzo_ids.join(', '))
                     infoModal.closeIn(3000)
                 } else {
                     infoModal.showModal()
-                    infoModal.error('Fehler beim Hinzufügen der NZB-Datei zu SABnzbd.\n' + result.error);
+                    infoModal.error('[SAB] Fehler beim Hinzufügen der NZB-Datei zu SABnzbd.\n' + result.error);
                 }
             },
             onerror: function (response) {
-                console.error('Anfrage fehlgeschlagen', response);
+                console.error('[SAB] Anfrage fehlgeschlagen', response);
                 alert("Anfrage an SABnzb schlug fail ! (mehr im Log)")
             }
         });
@@ -163,7 +163,7 @@ const SABNZBD = {
         formData.append('output', 'json');
         formData.append('cat', category);
         formData.append('apikey', SETTINGS.sab_api_key);
-        console.log('Upload Nzb to Sab:', formData);
+        console.log('[SAB] Upload Nzb to Sab:', formData);
         infoModal.print("Lade Nzb zu SABnzbd hoch ...")
 
         GM_xmlhttpRequest({
@@ -172,18 +172,18 @@ const SABNZBD = {
             data: formData,
             headers: SAB_HEADERS,
             onload: function (response) {
-                console.log('Upload response', response.status, response.statusText);
-                console.log('Response body', response.responseText);
+                console.log('[SAB] Upload response', response.status, response.statusText);
+                console.log('[SAB] Response body', response.responseText);
                 let result = JSON.parse(response.responseText);
                 if (result.status === true) {
-                    successAlert('Success! NZB added. ID: ' + result.nzo_ids.join(', '));
+                    successAlert('Erfolgreich NZB hinzugefügt. ID: ' + result.nzo_ids.join(', '));
                 } else {
-                    alert('Error adding NZB file to SABnzbd.\n' + (result.error || 'Unknown error'));
+                    alert('Fehler beim hinzufügen von NZB in SABnzbd.\n' + (result.error || 'Unknown error'));
                 }
             },
             onerror: function (response) {
-                console.error('Error during file upload', response.status, response.statusText);
-                alert("Could not upload NZB! (more in log)");
+                console.error('[SAB] Error during file upload', response.status, response.statusText);
+                alert("NZB-Upload zu SABnzbd nicht möglich! (more in log)");
             }
         });
     },
@@ -222,12 +222,12 @@ const SABNZBD = {
                         alert('Keine Kategorien in SABnzbd gefunden.');
                     }
                 } catch (e) {
-                    console.error('Error parsing SABnzbd response:', e);
+                    console.error('[SAB] Error parsing SABnzbd response:', e);
                     alert('Fehler beim Laden der Kategorien: ' + e.message);
                 }
             },
             onerror: (error) => {
-                console.error('Error loading categories from SABnzbd:', error);
+                console.error('[SAB] Error loading categories from SABnzbd:', error);
                 alert('Fehler beim Laden der Kategorien von SABnzbd.');
                 if (failed_callback) {
                     failed_callback(error);
@@ -250,25 +250,37 @@ const SABNZBD = {
 }
 
 const NZBGET = {
-    _getUrl: function (username, password) {
+    _getUrl: function () {
         if (!SETTINGS.nzbget_url) {
-            alert('Bitte gib zuerst die NZBGet URL ein.');
+            console.error('[NZBGET] URL not configured');
+            alert('Bitte setze die nzb-get url auf.');
             return null;
         }
         // add http-auth data
         const url = new URL(SETTINGS.nzbget_url);
-        url.username = username || SETTINGS.nzbget_username || '';
-        url.password = password || SETTINGS.nzbget_password || '';
 
         // add a path if not already present 'jsonrpc'
         if (!url.pathname.includes('jsonrpc')) {
             url.pathname = url.pathname.replace(/\/$/, '') + '/jsonrpc';
         }
 
+        console.log('[NZBGET] URL generated:', url.toString().replace(/:\/\/.*@/, '://***:***@'));
         return url.toString();
     },
 
+    _get_header: function () {
+        const basicAuth = btoa(`${SETTINGS.nzbget_username}:${SETTINGS.nzbget_password}`);
+
+        return {
+            ...NZBGET_HEADERS,
+            "Authorization": `Basic ${basicAuth}`
+        }
+    },
+
+
     _request: function ({method, params = {}, callback, error}) {
+        console.log(`[NZBGET] Request: ${method}`, params);
+
         const data = {
             jsonrpc: "2.0",
             method: method,
@@ -276,9 +288,10 @@ const NZBGET = {
             id: Math.floor(Math.random() * 1000000)
         };
 
-        const url = this._getUrl(SETTINGS.nzbget_username, SETTINGS.nzbget_password);
+        const url = this._getUrl();
 
         if (!url) {
+            console.error('[NZBGET] No valid URL generated');
             return null; // URL is not valid
         }
 
@@ -286,17 +299,22 @@ const NZBGET = {
             method: "POST",
             url: url,
             data: JSON.stringify(data),
-            headers: NZBGET_HEADERS,
+            headers: this._get_header(),
             onload: function (response) {
+                console.log(`[NZBGET] Response Status: ${response.status}`);
                 callback(response);
             },
             onerror: function (response) {
+                console.error(`[NZBGET] Request Error: ${response.status} - ${response.statusText}`);
+                console.error('[NZBGET] Response Text:', response.responseText);
                 error(response);
             }
         })
     },
 
     addUrl: function ({downloadLink, fileName, password}) {
+        console.log(`[NZBGET] Adding NZB - Name: ${fileName}, Has Password: ${!!password}`);
+
         // remove non Asci
         fileName = fileName.replace(/[^\x20-\x7E]/g, '').trim();
         // docs: https://nzbget.com/documentation/api/append/
@@ -319,32 +337,35 @@ const NZBGET = {
             ],
 
             callback: function (response) {
-                console.log(response.responseText);
+                console.log('[NZBGET] Response received:', response.responseText);
                 try {
                     let result = JSON.parse(response.responseText);
 
                     if (result.error) {
+                        console.error('[NZBGET] API Error:', result.error);
                         infoModal.showModal()
-                        infoModal.error('Fehler beim Hinzufügen der NZB-Datei zu NZBGet.\n' + result.error.message);
+                        infoModal.error('Fehler beim hinzufügen von NZB zu NZBGet.\n' + result.error.message);
                     } else if (result.result) {
-                        infoModal.print("Erfolg! NZB hinzugefügt. ID: " + (result.result || 'Unknown'))
+                        console.log('[NZBGET] NZB successfully added with ID:', result.result);
+                        infoModal.print("Erfolgreich Nzb hinzugefügt. ID: " + (result.result || 'Unknown'))
                         infoModal.closeIn(3000)
                     } else {
+                        console.warn('[NZBGET] Unexpected response without error or result');
                         infoModal.showModal()
-                        infoModal.error('Unbekannter Fehler beim Hinzufügen der NZB-Datei zu NZBGet.');
+                        infoModal.error('Unbekannter Fehler beim hinzufügen der nzb bei NZBGet.');
                     }
                 } catch (e) {
-                    console.error('Error parsing response:', e);
+                    console.error('[NZBGET] JSON Parse Error:', e, 'Response Text:', response.responseText);
                     infoModal.showModal()
-                    infoModal.error('Fehler beim Verarbeiten der Antwort von NZBGet.');
+                    infoModal.error('Fehler beim NZBGet. (mehr Infos im console-log)');
                 }
             },
             error: function (response) {
-                console.error('Anfrage fehlgeschlagen', response);
-                alert("Anfrage an NZBGet schlug fehl! (mehr im Log)")
+                alert("Request an NZBGet ist fehlgeschlagen! (mehr Infos im console-log)")
             }
         });
 
+        console.log('[NZBGET] Request started for:', downloadLink);
         infoModal.print("Sende Link zu NZBGet ...")
     },
 }
@@ -362,6 +383,7 @@ function getCategoriesButtons(parameters) {
             return SABNZBD.makeButton(parameters, item);
         })
     } else {
+        console.warn("No categories found in settings.")
         alert("Keine Kategorien in den Einstellungen gefunden. Bitte zuerst Kategorien hinzufügen.")
     }
 }
