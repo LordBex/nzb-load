@@ -3,7 +3,7 @@
 // @description         Automatically downloads NZB files from nzbindex.nl when links with the "nzblnk:" scheme are clicked.
 // @description:de_DE   Lädt NZB-Dateien automatisch von nzbindex.nl herunter, wenn auf Links mit dem Schema "nzblnk:" geklickt wird.
 // @author              LordBex
-// @version             v2.0.2
+// @version             v2.1
 // @match               *://*/*
 // @grant               GM_xmlhttpRequest
 // @grant               GM.xmlhttpRequest
@@ -57,6 +57,17 @@ function loadSettings() {
     GM.getValue(SETTINGS_KEY).then(savedSettings => {
         if (savedSettings) {
             Object.assign(SETTINGS, savedSettings);
+
+            // Migration to new config format
+            SETTINGS.sab_categories = SETTINGS.sab_categories.map(item => {
+                if (typeof item === 'string') {
+                    item = {
+                        value: item,
+                        fav: false
+                    }
+                }
+                return item
+            })
         } else {
             GM.setValue(SETTINGS_KEY, SETTINGS).then(() => {
                 console.log("Default settings saved.");
@@ -238,11 +249,24 @@ const SABNZBD = {
     },
 
     makeButton: function (parameters, category) {
+        if (typeof category === 'string') { // migration to new config format
+            category = {
+                value: category,
+                fav: false
+            }
+        }
+
+        let name = category.value.charAt(0).toUpperCase() + category.value.slice(1)
+
+        if (category.fav) {
+            name = '⭐ ' + name
+        }
+
         return {
-            name: category.charAt(0).toUpperCase() + category.slice(1),
-            value: category.toLowerCase(),
+            name: name,
+            value: category.value.toLowerCase(),
             f: () => {
-                parameters.category = category;
+                parameters.category = category.value;
                 SABNZBD.addUrl(parameters);
             }
         };
@@ -377,9 +401,15 @@ function successAlert(message) {
     }
 }
 
-function getCategoriesButtons(parameters) {
+function getCategoriesButtons(parameters, sort_callback) {
     if (SETTINGS.sab_categories.length > 0) {
-        return SETTINGS.sab_categories.map(item => {
+        let cats = SETTINGS.sab_categories;
+
+        if (sort_callback) {
+            cats = cats.sort(sort_callback);
+        }
+
+        return cats.map(item => {
             return SABNZBD.makeButton(parameters, item);
         })
     } else {
@@ -850,7 +880,7 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                     --info-color: #17a2b8;
                     --info-dark: #138496;
                     --bg-dark: #212529;
-                    --bg-card: #2a2a2a;
+                    --bg-card: #1a1d20;
                     --border-color: #444;
                     --text-color: #f5f5f5;
                     --text-muted: #aaa;
@@ -1204,6 +1234,35 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                     flex-shrink: 0;
                 }
 
+                .favorite-toggle {
+                    background-color: transparent;
+                    color: var(--text-muted);
+                    border: none;
+                    font-size: 20px;
+                    width: 36px;
+                    height: 36px;
+                    padding: 0;
+                    margin: 0 6px 0 0;
+                    cursor: pointer;
+                    transition: all var(--anim-duration);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    border-radius: 50%;
+                    flex-shrink: 0;
+                }
+                .favorite-toggle.active {
+                    color: #f5c518;
+                }
+                .category-item .favorite-toggle:hover {
+                    transform: translateY(-1px);
+                }
+                .category-item .left {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+
                 .remove-category:hover {
                     background-color: rgba(220, 53, 69, 0.1);
                     transform: scale(1.2);
@@ -1399,6 +1458,7 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
                                             </label>
 
                                             <div id="sab-categories-container"></div>
+                                            
                                             <div class="category-form">
                                                 <label style="margin: 0;">
                                                     Neue Kategorie:
@@ -1707,11 +1767,21 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
             SETTINGS.sab_categories.forEach((category, index) => {
                 const categoryItem = document.createElement('div');
                 categoryItem.className = 'category-item';
+
+                const name = (category && typeof category === 'object') ? category.value : String(category);
+                const isFav = !!(category && category.fav);
                 categoryItem.innerHTML = `
-                    <span>${category}</span>
+                    <div class="left">
+                        <button type="button" class="favorite-toggle ${isFav ? 'active' : ''}" data-index="${index}" title="Favorit umschalten">${isFav ? '★' : '☆'}</button>
+                        <span>${name}</span>
+                    </div>
                     <button type="button" class="remove-category" data-index="${index}">×</button>
                 `;
                 categoryList.appendChild(categoryItem);
+
+                // Event-Listener zum Favorisieren-Button
+                const favoriteButton = categoryItem.querySelector('.favorite-toggle');
+                favoriteButton.addEventListener('click', () => this.toggleFavoriteCategory(index));
 
                 // Event-Listener zum Entfernen-Button
                 const removeButton = categoryItem.querySelector('.remove-category');
@@ -1739,30 +1809,30 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
             return;
         }
 
-        // Kategorien-Array initialisieren, falls nicht vorhanden
         if (!SETTINGS.sab_categories) {
             SETTINGS.sab_categories = [];
         }
 
-        // Prüfen, ob Kategorie bereits existiert
-        if (SETTINGS.sab_categories.includes(categoryName)) {
+        const exists = SETTINGS.sab_categories.some(c => {
+            const val = (c && typeof c === 'object') ? c.value : String(c);
+            return val.toLowerCase() === categoryName.toLowerCase();
+        });
+        if (exists) {
             this.showToast('Diese Kategorie existiert bereits', true);
             return;
         }
 
-        // Neue Kategorie hinzufügen
-        SETTINGS.sab_categories.push(categoryName);
+        SETTINGS.sab_categories.push({ value: categoryName, fav: false });
 
-        // Eingabe löschen und Kategorien neu rendern
         newCategoryInput.value = '';
         this.renderCategories();
         this.showToast(`Kategorie "${categoryName}" hinzugefügt`);
     }
 
     removeCategory(index) {
-        const categoryName = SETTINGS.sab_categories[index];
+        const cat = SETTINGS.sab_categories[index];
+        const categoryName = (cat && typeof cat === 'object') ? cat.value : String(cat);
 
-        // Erstelle ein eigenes Bestätigungsdialog
         const confirmRemove = confirm(`Möchtest du die Kategorie "${categoryName}" wirklich entfernen?`);
 
         if (confirmRemove) {
@@ -1770,6 +1840,19 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
             this.renderCategories();
             this.showToast(`Kategorie "${categoryName}" entfernt`);
         }
+    }
+
+    toggleFavoriteCategory(index) {
+        const cat = SETTINGS.sab_categories[index];
+        if (!cat) return;
+        cat.fav = !cat.fav;
+        const name = (cat && typeof cat === 'object') ? cat.value : String(cat);
+        if (cat.fav) {
+            this.showToast(`"${name}" zu Favoriten hinzugefügt`);
+        } else {
+            this.showToast(`"${name}" aus Favoriten entfernt`);
+        }
+        this.renderCategories();
     }
 
     loadCategoriesFromSAB() {
@@ -1789,7 +1872,9 @@ customElements.define('nzblnk-settings-modal', class NzbSettingsModal extends HT
             sab_api_key: sab_api_key,
             callback: (categories) => {
                 if (categories && categories.length > 0) {
-                    SETTINGS.sab_categories = categories;
+                    // Preserve existing favorite flags by value
+                    const favSet = new Set((SETTINGS.sab_categories || []).filter(c => c && typeof c === 'object' && c.fav).map(c => (c.value || '').toLowerCase()));
+                    SETTINGS.sab_categories = categories.map(name => ({ value: String(name), fav: favSet.has(String(name).toLowerCase()) }));
                     this.renderCategories();
                     this.showToast(`${categories.length} Kategorien von SABnzbd geladen`);
                 } else {
@@ -1894,9 +1979,10 @@ function handleNzb(downloadLink, fileName, password) {
             const buttons = [getDownloadButton(parameters)];
 
             if (SETTINGS.sab_categories && SETTINGS.sab_categories.length > 1) {
-                const sabButtons = getCategoriesButtons(parameters);
-
                 if (SETTINGS.sab_sub_menu) {
+                    const sabButtons = getCategoriesButtons(parameters);
+
+                    // Gesamte Kategorien im Untermenü anzeigen
                     buttons.push({
                         name: 'Zu Sabnzbd',
                         f: () => {
@@ -1913,7 +1999,19 @@ function handleNzb(downloadLink, fileName, password) {
                         },
                         icon: 'https://raw.githubusercontent.com/sabnzbd/sabnzbd/refs/heads/develop/icons/sabnzbd.ico'
                     })
+
+                    // Favorites sollen auch außerhalb des Untermenüs sichtbar sein
+                    const favs = (SETTINGS.sab_categories || []).filter(c => c && c.fav);
+                    // make button for only the value -> no fav information
+                    const favButtons = favs.sort().map(cat => SABNZBD.makeButton(parameters, cat.value));
+
+                    if (favButtons.length) {
+                        buttons.push(...favButtons);
+                    }
                 } else {
+                    const sabButtons = getCategoriesButtons(parameters, (a, b) => {
+                        return b.fav - a.fav;
+                    });
                     buttons.push(...sabButtons)
                 }
             } else {
@@ -1922,8 +2020,9 @@ function handleNzb(downloadLink, fileName, password) {
                     f: () => {
                         let category = '*'
 
-                        if (SETTINGS.sab_categories) {
-                            category = SETTINGS.sab_categories[0] || '*'
+                        if (SETTINGS.sab_categories && SETTINGS.sab_categories.length > 0) {
+                            const first = SETTINGS.sab_categories[0];
+                            category = (first && typeof first === 'object') ? (first.value || '*') : (first || '*');
                         }
 
                         SABNZBD.addUrl({downloadLink, fileName, password, category})
