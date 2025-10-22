@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://lordbex.github.io/nzb-load/</loc>
+         <lastmod>2025-10-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lordbex.github.io/nzb-load/install/</loc>
+         <lastmod>2025-10-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lordbex.github.io/nzb-load/options/</loc>
+         <lastmod>2025-10-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lordbex.github.io/nzb-load/troubleshooting/</loc>
+         <lastmod>2025-10-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lordbex.github.io/nzb-load/usage/</loc>
+         <lastmod>2025-10-22</lastmod>
+    </url>
+    <url>
+         <loc>https://lordbex.github.io/nzb-load/userscripts-manager/</loc>
+         <lastmod>2025-10-22</lastmod>
+    </url>
+</urlset>
