@@ -3,7 +3,7 @@
 // @description         Automatically downloads NZB files from nzbindex.nl when links with the "nzblnk:" scheme are clicked.
 // @description:de_DE   Lädt NZB-Dateien automatisch von nzbindex.nl herunter, wenn auf Links mit dem Schema "nzblnk:" geklickt wird.
 // @author              LordBex
-// @version             v2.1
+// @version             v2.1.1
 // @match               *://*/*
 // @grant               GM_xmlhttpRequest
 // @grant               GM.xmlhttpRequest
@@ -306,10 +306,8 @@ const NZBGET = {
         console.log(`[NZBGET] Request: ${method}`, params);
 
         const data = {
-            jsonrpc: "2.0",
             method: method,
             params: params,
-            id: Math.floor(Math.random() * 1000000)
         };
 
         const url = this._getUrl();
@@ -345,16 +343,17 @@ const NZBGET = {
         this._request({
             method: "append",
             params: [
-                fileName + ".nzb",
-                downloadLink,
-                "",
-                0,
-                false,
-                false,
-                "",
-                0,
-                "FORCE",
-                [
+                fileName + ".nzb", // NZBFilename
+                downloadLink, // NZBContent
+                "", // Category
+                0, // Priority
+                false, // AddToTop
+                false, // AddPaused
+                "", // DupeKey
+                0, // DupeScore
+                "FORCE", // DupeMode
+                false, // AutoCategory (new in nzbget 25.4)
+                [ // PPParameters
                     {"*unpack": "yes"},
                     {'*unpack:password': password || ''},
                 ],
