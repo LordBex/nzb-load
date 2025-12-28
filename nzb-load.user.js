@@ -3,7 +3,7 @@
 // @description         Automatically downloads NZB files from nzbindex.nl when links with the "nzblnk:" scheme are clicked.
 // @description:de_DE   Lädt NZB-Dateien automatisch von nzbindex.nl herunter, wenn auf Links mit dem Schema "nzblnk:" geklickt wird.
 // @author              LordBex
-// @version             v2.1.1
+// @version             v2.2
 // @match               *://*/*
 // @grant               GM_xmlhttpRequest
 // @grant               GM.xmlhttpRequest
@@ -12,6 +12,8 @@
 // @grant               GM.registerMenuCommand
 // @connect             nzbindex.com
 // @connect             www.nzbking.com
+// @connect             binsearch.info
+// @connect             www.binsearch.info
 // @connect             localhost
 // @connect             *
 // @icon                https://i.imgur.com/O1ao7fL.png
@@ -2171,6 +2173,38 @@ function loadFromNzbIndex(nzb_info, when_failed) {
     });
 }
 
+function loadFromBinSearch(nzb_info, when_failed) {
+    console.log("Suche auf binsearch.com")
+    let url = `https://www.binsearch.info/search?q=${nzb_info.h}&max=5`
+
+    GM_xmlhttpRequest({
+        method: "GET",
+        url: url,
+        onload: function (response) {
+            console.log("binsearch:", response)
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(response.responseText, 'text/html');
+
+            const el = doc.querySelector("form[action*='nzb'] input[type='checkbox']")
+
+            if (!el) {
+                console.log("Keine ID auf binsearch.info gefunden!")
+                return when_failed()
+            }
+
+            const id = el.getAttribute('name')
+
+            console.log("Auf binsearch.info gefunden")
+            handleNzb(`https://www.binsearch.info/nzb?${id}=on`, nzb_info.t, nzb_info.p)
+        },
+        onerror: function (response) {
+            console.log("Request zu binsearch.info fehlgeschlagen")
+            console.error(response)
+            return when_failed()
+        }
+    });
+}
+
 function loadNzbLnk(nzblnk) {
     let nzb_info = parseNzblnkUrl(nzblnk)
 
@@ -2185,6 +2219,10 @@ function loadNzbLnk(nzblnk) {
         {
             info: "NzbKing",
             func: loadFromNzbKing,
+        },
+        {
+            info: "BinSearch",
+            func: loadFromBinSearch,
         }
     ]
 
